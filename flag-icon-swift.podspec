@@ -10,8 +10,8 @@ s.source       = { :git => "https://github.com/malczak/flag-icon-swift.git", :br
 
 s.platform     = :ios, "8.0"
 
-s.source_files  = "Source/*.swift"
-s.exclude_files = "Source/*Tests.swift"
+s.source_files  = "*.swift"
+s.exclude_files = "*Tests.swift"
 
 s.requires_arc = true
 end
