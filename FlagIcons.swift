@@ -7,9 +7,9 @@
 //
 
 import Foundation
+import UIKit
 
-
-class SpriteSheet {
+public class SpriteSheet {
     
     typealias GridSize = (cols: Int, rows: Int)
     
@@ -105,7 +105,7 @@ class SpriteSheet {
         CGContextDrawImage(bmpCtx, CGRectMake(0,0,imageSize.width,imageSize.height), cgImage)
     }
     
-    func getImageFor(code: String, deepCopy: Bool = false, scale: CGFloat = 2) -> UIImage? {
+    public func getImageFor(code: String, deepCopy: Bool = false, scale: CGFloat = 2) -> UIImage? {
         var cimg = imageCache[code]
         if nil == cimg || deepCopy {
             let data = getBytesFor(code)
@@ -143,7 +143,7 @@ class SpriteSheet {
         return cimg
     }
     
-    func getBytesFor(code: String) -> UnsafePointer<UInt8> {
+    public func getBytesFor(code: String) -> UnsafePointer<UInt8> {
         let idx = info.codes.indexOf(code.lowercaseString) ?? 0
         let dx = idx % info.gridSize.cols
         let dy = Int(Double(idx) / Double(info.gridSize.rows))
@@ -161,9 +161,25 @@ class SpriteSheet {
     
 }
 
-class FlagIcons {
+public class FlagIcons {
     
-    class func loadSheetFrom(file: String) -> SpriteSheet? {
+    public class func loadDefault() -> SpriteSheet? {
+        guard let assetsBundle = assetsBundle() else {
+            return nil
+        }
+
+        if let infoFile = assetsBundle.pathForResource("flags", ofType: "json") {
+            return self.loadSheetFrom(infoFile)
+        }
+        
+        return nil
+    }
+    
+    public class func loadSheetFrom(file: String) -> SpriteSheet? {
+        guard let assetsBundle = assetsBundle() else {
+            return nil
+        }
+        
         if let infoData = NSData(contentsOfFile: file) {
             do {
                 let infoObj = try NSJSONSerialization.JSONObjectWithData(infoData, options: NSJSONReadingOptions(rawValue: 0))
@@ -173,7 +189,8 @@ class FlagIcons {
                     let spriteSize = (spriteSizeObj["width"]!, spriteSizeObj["height"]!)
                     
                     if let codes = (infoObj["codes"] as? String)?.componentsSeparatedByString("|") {
-                        if let sheetFileName = infoObj["sheetFile"] as? String, let resourceUrl = NSBundle.mainBundle().resourceURL,
+                        if let sheetFileName = infoObj["sheetFile"] as? String,
+                            let resourceUrl = assetsBundle.resourceURL,
                             let sheetFileUrl = resourceUrl.URLByAppendingPathComponent(sheetFileName) {
                             if let image = UIImage(contentsOfFile: sheetFileUrl.path!) {
                                 let info = SpriteSheet.SheetInfo(gridSize: gridSize, spriteSize: spriteSize, codes: codes)
@@ -186,6 +203,14 @@ class FlagIcons {
             }
         }
         return nil
+    }
+    
+    private class func assetsBundle() -> NSBundle? {
+        let bundle = NSBundle(forClass: self)
+        guard let assetsBundlePath = bundle.pathForResource("assets", ofType: "bundle") else {
+            return nil
+        }
+        return NSBundle(path: assetsBundlePath);
     }
    
 }

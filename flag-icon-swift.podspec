@@ -12,6 +12,7 @@ s.platform     = :ios, "8.0"
 
 s.source_files  = "*.swift"
 s.exclude_files = "*Tests.swift"
+s.resource_bundle = { 'assets' => 'flag-assets/*'}
 
 s.requires_arc = true
 end
