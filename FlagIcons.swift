@@ -9,37 +9,37 @@
 import Foundation
 import UIKit
 
-public class SpriteSheet {
+open class SpriteSheet {
     
     typealias GridSize = (cols: Int, rows: Int)
     
     typealias ImageSize = (width: Int, height: Int)
     
     struct SheetInfo {
-        private(set) var gridSize: GridSize
+        fileprivate(set) var gridSize: GridSize
         
-        private(set) var spriteSize: ImageSize
+        fileprivate(set) var spriteSize: ImageSize
         
-        private(set) var codes: [String]
+        fileprivate(set) var codes: [String]
         
     }
     
-    private(set) var info: SheetInfo
+    fileprivate(set) var info: SheetInfo
     
-    private(set) var image: UIImage
+    fileprivate(set) var image: UIImage
     
-    private(set) var colorSpace: CGColorSpace
+    fileprivate(set) var colorSpace: CGColorSpace
     
-    private var imageData: UnsafeMutablePointer<Void>?
+    fileprivate var imageData: UnsafeMutableRawPointer?
     
-    private var imageCache = [String:UIImage]()
+    fileprivate var imageCache = [String:UIImage]()
     
-    private var cgImage: CGImage {
-        return image.CGImage!
+    fileprivate var cgImage: CGImage {
+        return image.cgImage!
     }
     
     var bitsPerComponent: Int {
-        return CGImageGetBitsPerComponent(cgImage)
+        return cgImage.bitsPerComponent
     }
     
     var bitsPerPixel: Int {
@@ -72,129 +72,136 @@ public class SpriteSheet {
     
     
     var bitmapInfo: CGBitmapInfo {
-        let imageBitmapInfo = CGImageGetBitmapInfo(cgImage)
-        let imageAlphaInfo = CGImageGetAlphaInfo(cgImage)
+        let imageBitmapInfo = cgImage.bitmapInfo
+        let imageAlphaInfo = cgImage.alphaInfo
         return CGBitmapInfo(rawValue:
-            (imageBitmapInfo.rawValue & (CGBitmapInfo.ByteOrderMask.rawValue)) |
-                (imageAlphaInfo.rawValue & (CGBitmapInfo.AlphaInfoMask.rawValue)))
+            (imageBitmapInfo.rawValue & (CGBitmapInfo.byteOrderMask.rawValue)) |
+                (imageAlphaInfo.rawValue & (CGBitmapInfo.alphaInfoMask.rawValue)))
     }
     
     var bytes: UnsafeMutablePointer<UInt8> {
-        return UnsafeMutablePointer<UInt8>(imageData!)
+        return imageData!.assumingMemoryBound(to: UInt8.self)
     }
     
     init?(sheetImage: UIImage, info sInfo: SheetInfo) {
         image = sheetImage
         info = sInfo
-        guard let cgImage = sheetImage.CGImage else {
+        guard let cgImage = sheetImage.cgImage else {
             return nil
         }
         
-        guard let cgColorSpace = CGImageGetColorSpace(cgImage) else {
+        guard let cgColorSpace = cgImage.colorSpace else {
             return nil
         }
         colorSpace = cgColorSpace
         
         
-        let bytes = UnsafeMutablePointer<Void>.alloc(sheetBytesCount)
-        guard let bmpCtx = CGBitmapContextCreate(bytes, Int(imageSize.width), Int(imageSize.height), bitsPerComponent, 4 * Int(imageSize.width), colorSpace, bitmapInfo.rawValue) else {
-            bytes.dealloc(sheetBytesCount)
+        let memory = (sheetBytesCount * MemoryLayout<UInt8>.stride, MemoryLayout<UInt8>.alignment)
+        let bytes = UnsafeMutableRawPointer.allocate(bytes: memory.0, alignedTo: memory.1)
+            //UnsafeMutablePointer<UInt8>.allocate(capacity: sheetBytesCount)
+        guard let bmpCtx = CGContext(data: bytes, width: Int(imageSize.width), height: Int(imageSize.height), bitsPerComponent: bitsPerComponent, bytesPerRow: 4 * Int(imageSize.width), space: colorSpace, bitmapInfo: bitmapInfo.rawValue) else {
+            bytes.deallocate(bytes: memory.0, alignedTo: memory.1)
             return
         }
         imageData = bytes
-        CGContextDrawImage(bmpCtx, CGRectMake(0,0,imageSize.width,imageSize.height), cgImage)
+        bmpCtx.draw(cgImage, in: CGRect(x: 0,y: 0,width: imageSize.width,height: imageSize.height))
     }
     
-    public func getImageFor(code: String, deepCopy: Bool = false, scale: CGFloat = 2) -> UIImage? {
+    open func getImageFor(_ code: String, deepCopy: Bool = false, scale: CGFloat = 2) -> UIImage? {
         var cimg = imageCache[code]
         if nil == cimg || deepCopy {
             let data = getBytesFor(code)
             
             if deepCopy {
-                guard let bmpCtx = CGBitmapContextCreate(nil, info.spriteSize.width, info.spriteSize.height, bitsPerComponent, 4 * info.spriteSize.width, colorSpace, bitmapInfo.rawValue) else {
+                guard let bmpCtx = CGContext(data: nil, width: info.spriteSize.width, height: info.spriteSize.height, bitsPerComponent: bitsPerComponent, bytesPerRow: 4 * info.spriteSize.width, space: colorSpace, bitmapInfo: bitmapInfo.rawValue) else {
                     return nil
                 }
                 
-                let bmpData = CGBitmapContextGetData(bmpCtx)
-                var srcData = UnsafeMutablePointer<UInt8>(data)
-                var curData = UnsafeMutablePointer<UInt8>(bmpData)
-                for _ in 0..<info.spriteSize.height {
-                    curData.assignFrom(srcData, count: spriteBytesPerRow)
-                    curData = curData.advancedBy(spriteBytesPerRow)
-                    srcData = srcData.advancedBy(sheetBytesPerRow)
+                if let bmpData = bmpCtx.data {
+                    var srcData = UnsafeMutablePointer<UInt8>(mutating: data)
+                    var curData = bmpData.assumingMemoryBound(to: UInt8.self)
+                    for _ in 0..<info.spriteSize.height {
+                        curData.assign(from: srcData, count: spriteBytesPerRow)
+                        curData = curData.advanced(by: spriteBytesPerRow)
+                        srcData = srcData.advanced(by: sheetBytesPerRow)
+                    }
+                    
+                    if let bmpImage = bmpCtx.makeImage() {
+                        return UIImage(cgImage: bmpImage, scale: scale, orientation: UIImageOrientation.up).withRenderingMode(.alwaysOriginal)
+                    }
                 }
                 
-                if let bmpImage = CGBitmapContextCreateImage(bmpCtx) {
-                    return UIImage(CGImage: bmpImage, scale: scale, orientation: UIImageOrientation.Up).imageWithRenderingMode(.AlwaysOriginal)
-                }
-            }
-            
-            guard let provider = CGDataProviderCreateWithData(nil, data, sheetBytesPerRow * info.spriteSize.height, {_ in}) else {
                 return nil
             }
             
-            guard let cgImage = CGImageCreate(info.spriteSize.width, info.spriteSize.height, bitsPerComponent, bitsPerPixel, sheetBytesPerRow, colorSpace, bitmapInfo, provider, nil, true, CGColorRenderingIntent.RenderingIntentDefault) else {
+            guard let provider = CGDataProvider(dataInfo: nil, data: data, size: sheetBytesPerRow * info.spriteSize.height, releaseData: {_ in}) else {
                 return nil
             }
-            cimg = UIImage(CGImage: cgImage)
+            
+            guard let cgImage = CGImage(width: info.spriteSize.width, height: info.spriteSize.height, bitsPerComponent: bitsPerComponent, bitsPerPixel: bitsPerPixel, bytesPerRow: sheetBytesPerRow, space: colorSpace, bitmapInfo: bitmapInfo, provider: provider, decode: nil, shouldInterpolate: true, intent: CGColorRenderingIntent.defaultIntent) else {
+                return nil
+            }
+            cimg = UIImage(cgImage: cgImage)
             imageCache[code] = cimg
         }
         
         return cimg
     }
     
-    public func getBytesFor(code: String) -> UnsafePointer<UInt8> {
-        let idx = info.codes.indexOf(code.lowercaseString) ?? 0
+    open func getBytesFor(_ code: String) -> UnsafePointer<UInt8> {
+        let idx = info.codes.index(of: code.lowercased()) ?? 0
         let dx = idx % info.gridSize.cols
         let dy = Int(Double(idx) / Double(info.gridSize.rows))
-        let data = bytes.advancedBy(sheetBytesPerCol * dy + spriteBytesPerRow * dx)
+        let data = bytes.advanced(by: sheetBytesPerCol * dy + spriteBytesPerRow * dx)
         return UnsafePointer<UInt8>(data)
     }
     
     deinit {
         imageCache.removeAll()
         if let data = imageData {
-            data.dealloc(sheetBytesCount)
+            let memory = (sheetBytesCount * MemoryLayout<UInt8>.stride, MemoryLayout<UInt8>.alignment)
+            data.deallocate(bytes: memory.0, alignedTo: memory.1)
         }
         imageData = nil
     }
     
 }
 
-public class FlagIcons {
+open class FlagIcons {
     
-    public class func loadDefault() -> SpriteSheet? {
+    open class func loadDefault() -> SpriteSheet? {
         guard let assetsBundle = assetsBundle() else {
             return nil
         }
 
-        if let infoFile = assetsBundle.pathForResource("flags", ofType: "json") {
+        if let infoFile = assetsBundle.path(forResource: "flags", ofType: "json") {
             return self.loadSheetFrom(infoFile)
         }
         
         return nil
     }
     
-    public class func loadSheetFrom(file: String) -> SpriteSheet? {
+    open class func loadSheetFrom(_ file: String) -> SpriteSheet? {
         guard let assetsBundle = assetsBundle() else {
             return nil
         }
         
-        if let infoData = NSData(contentsOfFile: file) {
+        if let infoData = try? Data(contentsOf: URL(fileURLWithPath: file)) {
             do {
-                let infoObj = try NSJSONSerialization.JSONObjectWithData(infoData, options: NSJSONReadingOptions(rawValue: 0))
-                if let gridSizeObj = infoObj["gridSize"] as? [String:Int],
-                    let spriteSizeObj = infoObj["spriteSize"] as? [String:Int] {
-                    let gridSize = (gridSizeObj["cols"]!, gridSizeObj["rows"]!)
-                    let spriteSize = (spriteSizeObj["width"]!, spriteSizeObj["height"]!)
-                    
-                    if let codes = (infoObj["codes"] as? String)?.componentsSeparatedByString("|") {
-                        if let sheetFileName = infoObj["sheetFile"] as? String,
-                            let resourceUrl = assetsBundle.resourceURL,
-                            let sheetFileUrl = resourceUrl.URLByAppendingPathComponent(sheetFileName) {
-                            if let image = UIImage(contentsOfFile: sheetFileUrl.path!) {
-                                let info = SpriteSheet.SheetInfo(gridSize: gridSize, spriteSize: spriteSize, codes: codes)
-                                return SpriteSheet(sheetImage: image, info:  info)
+                if let infoObj = try JSONSerialization.jsonObject(with: infoData, options: JSONSerialization.ReadingOptions(rawValue: 0)) as? [String:Any] {
+                    if let gridSizeObj = infoObj["gridSize"] as? [String:Int],
+                        let spriteSizeObj = infoObj["spriteSize"] as? [String:Int] {
+                        let gridSize = (gridSizeObj["cols"]!, gridSizeObj["rows"]!)
+                        let spriteSize = (spriteSizeObj["width"]!, spriteSizeObj["height"]!)
+                        
+                        if let codes = (infoObj["codes"] as? String)?.components(separatedBy: "|") {
+                            if let sheetFileName = infoObj["sheetFile"] as? String,
+                                let resourceUrl = assetsBundle.resourceURL {
+                                let sheetFileUrl = resourceUrl.appendingPathComponent(sheetFileName)
+                                if let image = UIImage(contentsOfFile: sheetFileUrl.path) {
+                                    let info = SpriteSheet.SheetInfo(gridSize: gridSize, spriteSize: spriteSize, codes: codes)
+                                    return SpriteSheet(sheetImage: image, info:  info)
+                                }
                             }
                         }
                     }
@@ -205,12 +212,12 @@ public class FlagIcons {
         return nil
     }
     
-    private class func assetsBundle() -> NSBundle? {
-        let bundle = NSBundle(forClass: self)
-        guard let assetsBundlePath = bundle.pathForResource("assets", ofType: "bundle") else {
+    fileprivate class func assetsBundle() -> Bundle? {
+        let bundle = Bundle(for: self)
+        guard let assetsBundlePath = bundle.path(forResource: "assets", ofType: "bundle") else {
             return nil
         }
-        return NSBundle(path: assetsBundlePath);
+        return Bundle(path: assetsBundlePath);
     }
    
 }
