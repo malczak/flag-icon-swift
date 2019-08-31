@@ -9,19 +9,24 @@
 import Foundation
 import UIKit
 
+/**
+ SpriteSheet class represents an image map
+ */
 open class SpriteSheet {
     
     typealias GridSize = (cols: Int, rows: Int)
     
     typealias ImageSize = (width: Int, height: Int)
     
+    /**
+     Struct stores information about a grid size, sprite size and country codes included in sprite sheet
+     */
     struct SheetInfo {
         fileprivate(set) var gridSize: GridSize
         
         fileprivate(set) var spriteSize: ImageSize
         
         fileprivate(set) var codes: [String]
-        
     }
     
     fileprivate(set) var info: SheetInfo
@@ -70,7 +75,6 @@ open class SpriteSheet {
         return sheetBytesPerRow * Int(imageSize.height)
     }
     
-    
     var bitmapInfo: CGBitmapInfo {
         let imageBitmapInfo = cgImage.bitmapInfo
         let imageAlphaInfo = cgImage.alphaInfo
@@ -96,13 +100,21 @@ open class SpriteSheet {
         colorSpace = cgColorSpace
         
         
-        let memory = (sheetBytesCount * MemoryLayout<UInt8>.stride, MemoryLayout<UInt8>.alignment)
-        let bytes = UnsafeMutableRawPointer.allocate(bytes: memory.0, alignedTo: memory.1)
-            //UnsafeMutablePointer<UInt8>.allocate(capacity: sheetBytesCount)
-        guard let bmpCtx = CGContext(data: bytes, width: Int(imageSize.width), height: Int(imageSize.height), bitsPerComponent: bitsPerComponent, bytesPerRow: 4 * Int(imageSize.width), space: colorSpace, bitmapInfo: bitmapInfo.rawValue) else {
-            bytes.deallocate(bytes: memory.0, alignedTo: memory.1)
-            return
+        let memory = (sheetBytesCount * MemoryLayout<UInt8>.stride,
+                      MemoryLayout<UInt8>.alignment)
+        let bytes = UnsafeMutableRawPointer.allocate(byteCount: memory.0,
+                                                     alignment: memory.1)
+        guard let bmpCtx = CGContext(data: bytes,
+                                     width: Int(imageSize.width),
+                                     height: Int(imageSize.height),
+                                     bitsPerComponent: bitsPerComponent,
+                                     bytesPerRow: 4 * Int(imageSize.width),
+                                     space: colorSpace,
+                                     bitmapInfo: bitmapInfo.rawValue) else {
+                                        bytes.deallocate()
+                                        return
         }
+        
         imageData = bytes
         bmpCtx.draw(cgImage, in: CGRect(x: 0,y: 0,width: imageSize.width,height: imageSize.height))
     }
@@ -113,12 +125,18 @@ open class SpriteSheet {
             let data = getBytesFor(code)
             
             if deepCopy {
-                guard let bmpCtx = CGContext(data: nil, width: info.spriteSize.width, height: info.spriteSize.height, bitsPerComponent: bitsPerComponent, bytesPerRow: 4 * info.spriteSize.width, space: colorSpace, bitmapInfo: bitmapInfo.rawValue) else {
-                    return nil
+                guard let bmpCtx = CGContext(data: nil,
+                                             width: info.spriteSize.width,
+                                             height: info.spriteSize.height,
+                                             bitsPerComponent: bitsPerComponent,
+                                             bytesPerRow: spriteBytesPerRow,
+                                             space: colorSpace,
+                                             bitmapInfo: bitmapInfo.rawValue) else {
+                                                return nil
                 }
                 
                 if let bmpData = bmpCtx.data {
-                    var srcData = UnsafeMutablePointer<UInt8>(mutating: data)
+                    var srcData = UnsafeMutablePointer<UInt8>(mutating: data.bytes)
                     var curData = bmpData.assumingMemoryBound(to: UInt8.self)
                     for _ in 0..<info.spriteSize.height {
                         curData.assign(from: srcData, count: spriteBytesPerRow)
@@ -127,19 +145,34 @@ open class SpriteSheet {
                     }
                     
                     if let bmpImage = bmpCtx.makeImage() {
-                        return UIImage(cgImage: bmpImage, scale: scale, orientation: UIImageOrientation.up).withRenderingMode(.alwaysOriginal)
+                        return UIImage(cgImage: bmpImage, scale: scale, orientation: UIImage.Orientation.up).withRenderingMode(.alwaysOriginal)
                     }
                 }
                 
                 return nil
             }
             
-            guard let provider = CGDataProvider(dataInfo: nil, data: data, size: sheetBytesPerRow * info.spriteSize.height, releaseData: {_ in}) else {
-                return nil
+            let expectedSize = sheetBytesPerRow * info.spriteSize.height
+            let size = min(expectedSize, data.size)
+            guard let provider = CGDataProvider(dataInfo: nil,
+                                                data: data.bytes,
+                                                size: size,
+                                                releaseData: {_,_,_  in}) else {
+                                                    return nil
             }
             
-            guard let cgImage = CGImage(width: info.spriteSize.width, height: info.spriteSize.height, bitsPerComponent: bitsPerComponent, bitsPerPixel: bitsPerPixel, bytesPerRow: sheetBytesPerRow, space: colorSpace, bitmapInfo: bitmapInfo, provider: provider, decode: nil, shouldInterpolate: true, intent: CGColorRenderingIntent.defaultIntent) else {
-                return nil
+            guard let cgImage = CGImage(width: info.spriteSize.width,
+                                        height: info.spriteSize.height,
+                                        bitsPerComponent: bitsPerComponent,
+                                        bitsPerPixel: bitsPerPixel,
+                                        bytesPerRow: sheetBytesPerRow,
+                                        space: colorSpace,
+                                        bitmapInfo: bitmapInfo,
+                                        provider: provider,
+                                        decode: nil,
+                                        shouldInterpolate: true,
+                                        intent: CGColorRenderingIntent.defaultIntent) else {
+                                            return nil
             }
             cimg = UIImage(cgImage: cgImage)
             imageCache[code] = cimg
@@ -148,32 +181,36 @@ open class SpriteSheet {
         return cimg
     }
     
-    open func getBytesFor(_ code: String) -> UnsafePointer<UInt8> {
-        let idx = info.codes.index(of: code.lowercased()) ?? 0
+    open func getBytesFor(_ code: String) -> (bytes: UnsafePointer<UInt8>, size: Int) {
+        let idx = info.codes.firstIndex(of: code.lowercased()) ?? 0
         let dx = idx % info.gridSize.cols
         let dy = Int(Double(idx) / Double(info.gridSize.rows))
-        let data = bytes.advanced(by: sheetBytesPerCol * dy + spriteBytesPerRow * dx)
-        return UnsafePointer<UInt8>(data)
+        let bytesOffset = sheetBytesPerCol * dy + spriteBytesPerRow * dx
+        let data = bytes.advanced(by: bytesOffset)
+        let totalMemory = sheetBytesCount * MemoryLayout<UInt8>.stride
+        return (UnsafePointer<UInt8>(data), totalMemory - bytesOffset)
     }
     
     deinit {
         imageCache.removeAll()
         if let data = imageData {
-            let memory = (sheetBytesCount * MemoryLayout<UInt8>.stride, MemoryLayout<UInt8>.alignment)
-            data.deallocate(bytes: memory.0, alignedTo: memory.1)
+            data.deallocate()
         }
         imageData = nil
     }
     
 }
 
+/**
+ Represents a flags icon sprite sheet
+ */
 open class FlagIcons {
     
     open class func loadDefault() -> SpriteSheet? {
         guard let assetsBundle = assetsBundle() else {
             return nil
         }
-
+        
         if let infoFile = assetsBundle.path(forResource: "flags", ofType: "json") {
             return self.loadSheetFrom(infoFile)
         }
@@ -219,5 +256,5 @@ open class FlagIcons {
         }
         return Bundle(path: assetsBundlePath);
     }
-   
+    
 }
