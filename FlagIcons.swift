@@ -100,15 +100,18 @@ open class SpriteSheet {
         colorSpace = cgColorSpace
         
         
-        let memory = (sheetBytesCount * MemoryLayout<UInt8>.stride,
-                      MemoryLayout<UInt8>.alignment)
-        let bytes = UnsafeMutableRawPointer.allocate(byteCount: memory.0,
-                                                     alignment: memory.1)
+        let memory = sheetMemoryLayout()
+        let bytes = UnsafeMutableRawPointer.allocate(byteCount: memory.size,
+                                                     alignment: memory.alignment)
+        
+        let imageWidth = Int(imageSize.width)
+        let imageHeight = Int(imageSize.height)
+        
         guard let bmpCtx = CGContext(data: bytes,
-                                     width: Int(imageSize.width),
-                                     height: Int(imageSize.height),
+                                     width: imageWidth,
+                                     height: imageHeight,
                                      bitsPerComponent: bitsPerComponent,
-                                     bytesPerRow: 4 * Int(imageSize.width),
+                                     bytesPerRow: 4 * imageWidth,
                                      space: colorSpace,
                                      bitmapInfo: bitmapInfo.rawValue) else {
                                         bytes.deallocate()
@@ -116,11 +119,14 @@ open class SpriteSheet {
         }
         
         imageData = bytes
-        bmpCtx.draw(cgImage, in: CGRect(x: 0,y: 0,width: imageSize.width,height: imageSize.height))
+        bmpCtx.draw(cgImage,
+                    in: CGRect(x: 0, y: 0,
+                               width: imageSize.width,
+                               height: imageSize.height))
     }
     
     open func getImageFor(_ code: String, deepCopy: Bool = false, scale: CGFloat = 2) -> UIImage? {
-        var cimg = imageCache[code]
+        var cimg = imageCache[code] // cache is not thread safe
         if nil == cimg || deepCopy {
             let data = getBytesFor(code)
             
@@ -154,13 +160,15 @@ open class SpriteSheet {
             
             let expectedSize = sheetBytesPerRow * info.spriteSize.height
             let size = min(expectedSize, data.size)
+            
+            print("\t\tSize: ⎣\(expectedSize), \(data.size)⎦⇢ \(size)")
             guard let provider = CGDataProvider(dataInfo: nil,
                                                 data: data.bytes,
                                                 size: size,
                                                 releaseData: {_,_,_  in}) else {
                                                     return nil
             }
-            
+        
             guard let cgImage = CGImage(width: info.spriteSize.width,
                                         height: info.spriteSize.height,
                                         bitsPerComponent: bitsPerComponent,
@@ -184,11 +192,34 @@ open class SpriteSheet {
     open func getBytesFor(_ code: String) -> (bytes: UnsafePointer<UInt8>, size: Int) {
         let idx = info.codes.firstIndex(of: code.lowercased()) ?? 0
         let dx = idx % info.gridSize.cols
-        let dy = Int(Double(idx) / Double(info.gridSize.rows))
+        let dy = idx / info.gridSize.rows
         let bytesOffset = sheetBytesPerCol * dy + spriteBytesPerRow * dx
         let data = bytes.advanced(by: bytesOffset)
-        let totalMemory = sheetBytesCount * MemoryLayout<UInt8>.stride
+        let totalMemory = sheetMemoryLayout().size
+        print("""
+             /*********
+                    code   : \(code)
+                     index : \(idx)
+                    d(x/y) : \(dx) x \(dy) | \(idx % info.gridSize.cols) x \(idx/info.gridSize.rows)
+              bytes offset : \(bytesOffset)
+                         Sheet
+                   sprites : \(info.codes.count)
+                 grid size : \(info.gridSize.cols) x \(info.gridSize.rows)
+               sprite size : \(info.spriteSize.width) x \(info.spriteSize.height)
+            bits/Component : \(bitsPerComponent)
+                bits/Pixel : \(bitsPerPixel)
+                         Memory
+                     total : \(totalMemory)
+                  provider : \(sheetBytesPerRow * info.spriteSize.height)
+                    sprite : \(spriteBytesCount)
+                      left : \(totalMemory - bytesOffset)
+        """)
         return (UnsafePointer<UInt8>(data), totalMemory - bytesOffset)
+    }
+    
+    func sheetMemoryLayout() -> (size: Int, alignment: Int) {        
+        return (sheetBytesCount * MemoryLayout<UInt8>.stride,
+                MemoryLayout<UInt8>.alignment)
     }
     
     deinit {
