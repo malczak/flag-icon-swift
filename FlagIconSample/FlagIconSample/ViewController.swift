@@ -30,6 +30,11 @@ class ViewController: UITableViewController {
                            forCellReuseIdentifier: Consts.countryCellId)
     }
     
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(true)
+        flagSheet?.flushCache()
+    }
+    
     override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
         return countries.count
     }
