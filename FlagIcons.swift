@@ -160,8 +160,6 @@ open class SpriteSheet {
             
             let expectedSize = sheetBytesPerRow * info.spriteSize.height
             let size = min(expectedSize, data.size)
-            
-            print("\t\tSize: ⎣\(expectedSize), \(data.size)⎦⇢ \(size)")
             guard let provider = CGDataProvider(dataInfo: nil,
                                                 data: data.bytes,
                                                 size: size,
@@ -196,6 +194,8 @@ open class SpriteSheet {
         let bytesOffset = sheetBytesPerCol * dy + spriteBytesPerRow * dx
         let data = bytes.advanced(by: bytesOffset)
         let totalMemory = sheetMemoryLayout().size
+        
+        #if TRACK_MEMORY
         print("""
              /*********
                     code   : \(code)
@@ -212,9 +212,15 @@ open class SpriteSheet {
                      total : \(totalMemory)
                   provider : \(sheetBytesPerRow * info.spriteSize.height)
                     sprite : \(spriteBytesCount)
-                      left : \(totalMemory - bytesOffset)
+                      left : \(totalMemory - bytesOffseTRACK_MEMORYt)
         """)
+        #endif
+        
         return (UnsafePointer<UInt8>(data), totalMemory - bytesOffset)
+    }
+    
+    open func flushCache() {
+        imageCache.removeAll()
     }
     
     func sheetMemoryLayout() -> (size: Int, alignment: Int) {        
@@ -237,6 +243,11 @@ open class SpriteSheet {
  */
 open class FlagIcons {
     
+    public struct Country {
+        public let name: String;
+        public let code: String;
+    }
+    
     open class func loadDefault() -> SpriteSheet? {
         guard let assetsBundle = assetsBundle() else {
             return nil
@@ -249,37 +260,61 @@ open class FlagIcons {
         return nil
     }
     
+    open class func loadCountries() -> [Country]? {
+        guard let assetsBundle = assetsBundle() else {
+            return nil
+        }
+        
+        if let dataFile = assetsBundle.path(forResource: "countries", ofType: "json") {
+            if let countriesSet: [[String:String]] = loadJSON(file: dataFile) {
+                return countriesSet.compactMap({countryInfo in
+                    guard case let (name?, code?) = (countryInfo["name"], countryInfo["code"]) else {
+                        return nil
+                    }
+                    return Country(name: name, code: code)
+                }).sorted(by: {country1, country2 in country1.name < country2.name})
+            }
+        }
+        
+        return nil
+    }
+    
     open class func loadSheetFrom(_ file: String) -> SpriteSheet? {
         guard let assetsBundle = assetsBundle() else {
             return nil
         }
         
-        if let infoData = try? Data(contentsOf: URL(fileURLWithPath: file)) {
-            do {
-                if let infoObj = try JSONSerialization.jsonObject(with: infoData, options: JSONSerialization.ReadingOptions(rawValue: 0)) as? [String:Any] {
-                    if let gridSizeObj = infoObj["gridSize"] as? [String:Int],
-                        let spriteSizeObj = infoObj["spriteSize"] as? [String:Int] {
-                        let gridSize = (gridSizeObj["cols"]!, gridSizeObj["rows"]!)
-                        let spriteSize = (spriteSizeObj["width"]!, spriteSizeObj["height"]!)
-                        
-                        if let codes = (infoObj["codes"] as? String)?.components(separatedBy: "|") {
-                            if let sheetFileName = infoObj["sheetFile"] as? String,
-                                let resourceUrl = assetsBundle.resourceURL {
-                                let sheetFileUrl = resourceUrl.appendingPathComponent(sheetFileName)
-                                if let image = UIImage(contentsOfFile: sheetFileUrl.path) {
-                                    let info = SpriteSheet.SheetInfo(gridSize: gridSize, spriteSize: spriteSize, codes: codes)
-                                    return SpriteSheet(sheetImage: image, info:  info)
-                                }
-                            }
+        if let infoObj: [String:Any] = loadJSON(file: file) {
+            if let gridSizeObj = infoObj["gridSize"] as? [String:Int],
+                let spriteSizeObj = infoObj["spriteSize"] as? [String:Int] {
+                let gridSize = (gridSizeObj["cols"]!, gridSizeObj["rows"]!)
+                let spriteSize = (spriteSizeObj["width"]!, spriteSizeObj["height"]!)
+                
+                if let codes = (infoObj["codes"] as? String)?.components(separatedBy: "|") {
+                    if let sheetFileName = infoObj["sheetFile"] as? String,
+                        let resourceUrl = assetsBundle.resourceURL {
+                        let sheetFileUrl = resourceUrl.appendingPathComponent(sheetFileName)
+                        if let image = UIImage(contentsOfFile: sheetFileUrl.path) {
+                            let info = SpriteSheet.SheetInfo(gridSize: gridSize, spriteSize: spriteSize, codes: codes)
+                            return SpriteSheet(sheetImage: image, info:  info)
                         }
                     }
                 }
-            } catch {
             }
         }
+        
         return nil
     }
     
+    fileprivate class func loadJSON<T>(file: String) -> T? {
+        guard let data = try? Data(contentsOf: URL(fileURLWithPath: file)) else {
+            return nil
+        }
+        
+        let options = JSONSerialization.ReadingOptions(rawValue: 0)
+        return try? JSONSerialization.jsonObject(with: data, options: options) as? T
+    }
+
     fileprivate class func assetsBundle() -> Bundle? {
         let bundle = Bundle(for: self)
         guard let assetsBundlePath = bundle.path(forResource: "assets", ofType: "bundle") else {

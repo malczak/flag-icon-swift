@@ -1,0 +1,2 @@
+target 'FlagIconSample'
+pod 'flag-icon-swift', :path => './..'
